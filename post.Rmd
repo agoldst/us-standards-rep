@@ -1,18 +1,19 @@
 ---
-title: "Of Literary Standards and Logistic Regression: A Replication"
-date: January 4, 2015
+title: "Of Literary Standards and Logistic Regression: A Reproduction"
+date: 2016-01-04
 categories: [dh,theory,sociological-bandwagon,kludgetastic]
+layout: post
 output:
     md_document:
         variant: markdown
         pandoc_args: ["--no-wrap"]
 ---
 
-This post is a scattered discussion and partial replication of Ted Underwood and Jordan Sellers's fascinating essay "How Quickly Do Literary Standards Change?" (available in [preprint](https://figshare.com/articles/How_Quickly_Do_Literary_Standards_Change_/1418394) and discussed on [Ted's blog](http://tedunderwood.com/2015/05/18/how-quickly-do-literary-standards-change/)). Hats off to Ted and Jordan, who have contributed something really remarkable here, not just in their provocative arguments but in the data they have made usable by others. It's one thing to circulate data and code so that someone can *in principle* re-run your scripts---though that is already a lot---and quite another to make the data accessible enough for fresh analyses. The latter is a very demanding standard, too demanding for everyone to meet, I think. But it *is* what is required to let others push on your results. Even more importantly, it's what's needed to make research results *pedagogically* available. As I argue in an essay I'm working on now, any quantitative methods pedagogy should---must---lean heavily on the results of research. In the [immortal words](http://miriamposner.com/blog/humanities-data-a-necessary-contradiction) of Miriam Posner, "It's just awful trying to find a humanities dataset": one of the best ways to address this challenge would be to make good research data available in recirculable, easily accessible form.
+This post is a discussion and partial replication of Ted Underwood and Jordan Sellers's fascinating essay "How Quickly Do Literary Standards Change?" (available in [preprint](https://figshare.com/articles/How_Quickly_Do_Literary_Standards_Change_/1418394) and discussed on [Ted's blog](http://tedunderwood.com/2015/05/18/how-quickly-do-literary-standards-change/)). Hats off to Ted and Jordan, who have contributed something really remarkable here, not just in their provocative arguments but in the data they have made usable by others. It's one thing to circulate data and code so that someone can *in principle* re-run your scripts---though that is already a lot---and quite another to make the data accessible enough for fresh analyses. The latter is a very demanding standard, too demanding for everyone to meet, I think. But it *is* what is required to let others build directly on your results. Even more importantly, it's what's needed to make research results *pedagogically* available. As I argue in an essay I'm working on now, any quantitative methods pedagogy should---must---lean heavily on the results of research. In the [immortal words](http://miriamposner.com/blog/humanities-data-a-necessary-contradiction) of Miriam Posner, "It's just awful trying to find a humanities dataset": one of the best ways to address this challenge would be to make good research data available in recirculable, easily accessible form.
 
-So consider this post partly pedagogical in intent: I want to show that Ted and Jordan's [replication repository](https://github.com/tedunderwood/paceofchange) is already an excellent dataset and could be the basis for a lesson in automatic classification. What I want to emphasize here is that their work allows us to breeze right past the data-wrangling and straight into the analytical substance. (This is not entirely obvious from their python code, but I'm going to try to make it obvious by doing the whole thing in R instead.) 
+So consider this post partly pedagogical in intent: I want to show that Ted and Jordan's [replication repository](https://github.com/tedunderwood/paceofchange) is already an excellent dataset and could be the basis for a lesson in automatic classification. What I want to emphasize here is that their work allows us to breeze right past the data-wrangling and straight into the analytical substance. This may not be entirely obvious from their python code, so I'm going to try to make it clearer by doing the whole thing in R instead. 
 
-```{r setup, cache=F}
+```{r setup, cache=F, echo=F, warning=F, message=F}
 library(knitr)
 # attempt to set a reasonable code output textwidth
 options(width=44)
@@ -21,7 +22,7 @@ opts_chunk$set(
     comment=NA, # no comment chars decorating code output
     collapse=T, # multiple statements and output collapsed together
     message=F, warning=F,             # quit your chatter, R
-    error=T,    # stop on error: can get annoying
+    error=F,    # stop on error: can get annoying
     echo=F,     # hide chunk code by default
     cache=T)
 
@@ -40,8 +41,8 @@ set.seed(27182)
 dep_auto()
 ```
 
-
-For the most part, I'm going to omit the R code I'm using, except where it makes a point about the analysis. The full R markdown source for this post is [in this repository](). Here we go...
+Rather than give all the technical detail, 
+I'll only show the R code where it makes a point about the analysis. The full R markdown source for this post is [in this repository](http://github.com/agoldst/us-standards-rep). Feel free to skim right past the R listings anyway. This is a literary theory and data analysis post that happens to have some software details in it, not a programming post. Here we go...
 
 <!-- more -->
 
@@ -91,7 +92,7 @@ pruned_counts <- counts %>%
     wordcounts_Matrix()
 ```
 
-We actually have `r nrow(pruned_counts)` features, a superset of U&S's, because we have allowed for ties at the bottom of the frequency list. If the results are sensitive to this, that's something we'd like to know, so let's continue without discarding those extra features.[^numeric-check]
+We actually have `r ncol(pruned_counts)` features, a superset of U&S's, because we have allowed for ties at the bottom of the frequency list. If the results are sensitive to this, that's something we'd like to know, so let's continue without discarding those extra features.[^numeric-check]
 
 [^numeric-check]: I did try to check that I was working with the same counts of the 3200 features in common. See the end of the post.
 
@@ -116,7 +117,9 @@ feats <- rescale_rows(pruned_counts, 1 / (rowSums(pruned_counts) + 0.001))
 
 [^logit]: A note because for the longest time I have found this confusing. It's called "binomial" because we model the response variable (that is, reviewed or random) as a draw from a binomial distribution---a (biased) coin flip, where the chance of being reviewed, that is, the expectation of the variable's distribution, depends on the counts of the features for each case. 
 
-Here is the modeling step.^[Both a `for` loop and assigning to a vector one element at a time, and proud of it.]
+Here is the modeling step.[^nopath]
+
+[^nopath]: We specify the regularization constant lambda in the call to `glmnet`, even though the documentation for `glmnet` warns us that specifying a single lambda is much slower than computing a "regularization path" (that is, trying a sequence of lambda values) and then doing the prediction for fixed lambda afterwards. In this case doing the regularization paths takes about 50 times as long. I don't know why.
 
 ```{r estimate-reviewed-probs, echo=T}
 # U&S's choice of regularization constant (?)
@@ -147,7 +150,6 @@ for (i in 1:nrow(feats)) {
 }
 ```
 
-We don't actually specify the regularization constant lambda in the call to `glmnet`. The documentation for `glmnet` warns us that specifying a single lambda is much slower than computing a "regularization path" (that is, trying a sequence of lambda values) and then doing the prediction for fixed lambda afterwards, but in this case doing the regularization paths takes about 50 times as long. 
 
 We now have what we need to try to reproduce U&S's key figure (fig. 1, p. 8).  The date information is not included in the model, but it is used in the plot.
 
@@ -162,7 +164,7 @@ meta %>%
         geom_smooth(method="lm", se=F, color="blue") +
         labs(x="publication year",
              y="predicted probability",
-             title="Regularized logistic regression predictions of poetry reviewing over time")
+             title="Regression predictions of poetry reviewing over time")
 ```
 
 ```{r confusion}
@@ -170,12 +172,12 @@ confusion <- function (p, actual) {
     table(p >= 0.5, actual)
 }
 repro_cm <- confusion(predicted_probs, meta$recept)
+pred_correct <- repro_cm["TRUE", "reviewed"] + repro_cm["FALSE", "random"]
 ```
 
-The visual impression of this plot is very similar to U&S's figure. The key features of the plot that U&S emphasize are here: mostly correct classifications (`r
-repro_cm["TRUE", "reviewed"] + repro_cm["FALSE", "random"]
-` out of `r nrow(feats)`),
-plus an upward-sloping time-trend line. In fact I think that most of the predictions are a close match to U&S's. Voilà: a reproduction!
+The visual impression of this plot is very similar to U&S's figure. The key features of the plot that U&S emphasize are here: mostly correct classifications (
+`r pred_correct`/`r nrow(feats)` = `r round(pred_correct / nrow(feats) * 100, 1)`%),
+plus an upward-sloping time-trend line. In fact I think that most of the predictions are a close match to U&S's. Voilà: a reproduction.
 
 Now that we know we've successfully found our way to U&S's ballpark, we can examine the effect of the modeling choices we can make. Let's start with the question of the elusive lambda, by fitting a model to all the data at varying values of lambda. We'll let `glmnet` choose the sequence and compute a classification error rate at each lambda value using 20-fold cross-validation:
 
@@ -331,7 +333,7 @@ m_time$lambda.min
 # which achieves the following CV classification error rate
 min(m_time$cvm)
 # with s.d.
-m_time$cvsd(which.min(m_time$cvm))
+m_time$cvsd[which.min(m_time$cvm)]
 ```
 
 Possibly (not strongly) better. As U&S point out, a linear time trend isn't really interpretable, since the corpus is balanced over time between random and reviewed volumes. This tells us there is unexplained variation, which would need, perhaps, to be modeled by including some kind of feedback effect. That sounds hard but worth doing.
@@ -346,12 +348,14 @@ m_cvl <- cv.glmnet(feats, meta$recept, family="binomial",
 m_cvl$nzero[which.min(m_cvl$cvm)]
 ```
 
-At the cost of a moderately increased minimum CV error rate---`r min(m_cvl$cvm)`, s.d. `r m_cvl$cvsd[which.min(m_cvl$cvm)]`---this proposes a model with many fewer predictors. The only moral here is, again, that there is a lot of correlation among the word frequencies, and hence a lot of redundant information.
+At the cost of a moderately increased minimum CV error rate---`r signif(min(m_cvl$cvm), 2)`, s.d. `r signif(m_cvl$cvsd[which.min(m_cvl$cvm)], 2)`---this proposes a model with many fewer predictors. The only moral here is, again, that there is a lot of correlation among the word frequencies, and hence a lot of redundant information.
 
-And here we come up against the limits of the word lists themselves for understanding what U&S rightly emphasize is a boundary drawn by social processes. Assuming that we have managed to dodge all the dangers of overfitting, all the reasonable (though not awe-inspiring) performance of the word-based classifier tells us is that these combinations of word frequencies correlate with whatever factors might explain the difference between the reviewed volumes and the randomly-sampled ones. Everything we know about literary reception tells us that some of those factors are not textual (relating instead to the author's and the publisher's characteristics, the overall configuration of the book trade, etc.), even though *some* of those non-textual factors may themselves have verbal correlates. In other words: are the "literary standards" examined here the linguistic criteria which earn legitimacy, or are they the verbal habits of those who are legitimate? I'm sure U&S would answer "both." Disentangling the two will require modeling in which the non-linguistic stands a chance of emerging as an explanatory factor.
+And here we come up against the limits of the word lists themselves for understanding what U&S rightly emphasize is a boundary drawn by social processes. Assuming that we have managed to dodge all the dangers of overfitting, all the reasonable (though not awe-inspiring) performance of the word-based classifier tells us is that these combinations of word frequencies correlate with whatever factors might explain the difference between the reviewed volumes and the randomly-sampled ones. Everything we know about literary reception tells us that some of those factors are not textual (relating instead to the author's and the publisher's characteristics, the overall configuration of the book trade, etc.), even though *some* of those non-textual factors may themselves have verbal correlates. Then, though lists of words lend themselves mostly easily to interpretation in terms of diction, lexical choice is presumably conditioned by many phenomena that are mediated in the text of poems, like genre, theme, and meter. In other words: are the "literary standards" examined here the linguistic criteria which earn legitimacy, or are they the verbal habits of those who are legitimate? I'm sure U&S would answer "both." Disentangling the two will require modeling in which the non-linguistic stands a chance of emerging as an explanatory factor.
 
 
-## Appendix: non-reproduction
+## Appendix: a non-reproduction
+
+I wanted to check that my feature counts matched U&S's by using their list of model coefficients to reproduce their list of estimated probabilities. But I did not quite succeed:
 
 ```{r check}
 # load U&S's model coefficients
@@ -373,5 +377,5 @@ computed_probs <- apply(
 all.equal(unname(computed_probs), us_predict$logistic, tol=1e-4)
 ```
 
-But the match is not exact, and a few numbers are quite different. I am not sure what's going on here. (There's no intercept term in these calculations, though there is probably one in the model U&S used. But because of the balanced design of the corpus, that intercept should make almost no difference.) I am docking U&S's Reproducibility Grade down from 100 to 99.95 for the [undocumented rescaling of coefficients by 100](https://github.com/tedunderwood/paceofchange/blob/master/parallel_crossvalidate.py#L431) in their outputs.
+The match is not exact, and a few numbers are quite different. I am not sure what's going on here. There's no intercept term in these calculations, though there is probably one in the model U&S used. But because of the balanced design of the corpus, that intercept should make almost no difference. I am docking U&S's Reproducibility Grade down from 100 to 99.95 for the [undocumented rescaling of coefficients by 100](https://github.com/tedunderwood/paceofchange/blob/master/parallel_crossvalidate.py#L431) in their outputs.
 
