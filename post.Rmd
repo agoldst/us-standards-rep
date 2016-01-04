@@ -1,0 +1,377 @@
+---
+title: "Of Literary Standards and Logistic Regression: A Replication"
+date: January 4, 2015
+categories: [dh,theory,sociological-bandwagon,kludgetastic]
+output:
+    md_document:
+        variant: markdown
+        pandoc_args: ["--no-wrap"]
+---
+
+This post is a scattered discussion and partial replication of Ted Underwood and Jordan Sellers's fascinating essay "How Quickly Do Literary Standards Change?" (available in [preprint](https://figshare.com/articles/How_Quickly_Do_Literary_Standards_Change_/1418394) and discussed on [Ted's blog](http://tedunderwood.com/2015/05/18/how-quickly-do-literary-standards-change/)). Hats off to Ted and Jordan, who have contributed something really remarkable here, not just in their provocative arguments but in the data they have made usable by others. It's one thing to circulate data and code so that someone can *in principle* re-run your scripts---though that is already a lot---and quite another to make the data accessible enough for fresh analyses. The latter is a very demanding standard, too demanding for everyone to meet, I think. But it *is* what is required to let others push on your results. Even more importantly, it's what's needed to make research results *pedagogically* available. As I argue in an essay I'm working on now, any quantitative methods pedagogy should---must---lean heavily on the results of research. In the [immortal words](http://miriamposner.com/blog/humanities-data-a-necessary-contradiction) of Miriam Posner, "It's just awful trying to find a humanities dataset": one of the best ways to address this challenge would be to make good research data available in recirculable, easily accessible form.
+
+So consider this post partly pedagogical in intent: I want to show that Ted and Jordan's [replication repository](https://github.com/tedunderwood/paceofchange) is already an excellent dataset and could be the basis for a lesson in automatic classification. What I want to emphasize here is that their work allows us to breeze right past the data-wrangling and straight into the analytical substance. (This is not entirely obvious from their python code, but I'm going to try to make it obvious by doing the whole thing in R instead.) 
+
+```{r setup, cache=F}
+library(knitr)
+# attempt to set a reasonable code output textwidth
+options(width=44)
+opts_knit$set(width=44)
+opts_chunk$set(
+    comment=NA, # no comment chars decorating code output
+    collapse=T, # multiple statements and output collapsed together
+    message=F, warning=F,             # quit your chatter, R
+    error=T,    # stop on error: can get annoying
+    echo=F,     # hide chunk code by default
+    cache=T)
+
+library(zoo)
+library(tidyr)
+library(dplyr)
+library(readr)
+library(stringr)
+library(ggplot2)
+library(dfrtopics)
+library(doMC)
+registerDoMC(cores=2)
+library(glmnet)
+
+set.seed(27182)
+dep_auto()
+```
+
+
+For the most part, I'm going to omit the R code I'm using, except where it makes a point about the analysis. The full R markdown source for this post is [in this repository](). Here we go...
+
+<!-- more -->
+
+I'm going to call Ted and Jordan U&S (Underwood and Sellers). First I downloaded U&S's [replication repository](https://github.com/tedunderwood/paceofchange).
+Loading the metadata as provided by U&S is straightforward. Reading in their files with feature counts for their chosen volumes is also not too hard to do from scratch, but I already did some of that work in my [dfrtopics package](https://github.com/agoldst/dfrtopics) and applied it to [files like these](/blog/2015/09/23/hathi/) in an earlier blogpost, so I can do that task in a few lines:
+
+```{r load-meta}
+meta <- read_csv("paceofchange/poemeta.csv")
+meta <- meta %>%
+    rename(id=docid) %>% 
+    filter(recept %in% c("reviewed", "random")) %>%
+    mutate(recept=factor(recept))
+anons <- is.na(meta$author)
+# ensure anonymous authors are distinguished
+meta$author[anons] <- str_c("X", 1:sum(anons))
+meta$author <- factor(meta$author)
+```
+
+```{r load-counts, echo=T}
+read_hathi <- function (f) read_delim(f,
+    delim="\t", quote="", escape_backslash=F, na="",
+    col_names=F, col_types="ci")
+fs <- meta %>%
+    transmute(id, filename=str_c(id, ".poe.tsv")) %>% 
+    mutate(filename=file.path("paceofchange", "poems", filename))
+# Check ID's match filenames
+stopifnot(all(file.exists(fs$filename)))
+# load 'em up
+counts <- read_wordcounts(fs$filename, fs$id, read_hathi)
+```
+
+Now let's start by seeing whether we can reproduce U&S's principal model (and the principal figure that goes with it). They choose only the 3200 word features with the highest document frequencies, [skipping punctuation features](https://github.com/tedunderwood/paceofchange/blob/master/parallel_crossvalidate.py#L267).^[
+Despite the use of `isalpha()` there, U&S's feature list includes words with the apostrophe in them. To get their feature list I had to take account of this possibility explicitly. PSA to pythonians: don't use `isalpha` in your reproducible code. Explicitly match on a regular expression, and have fun importing `regex`.]
+Here too dfrtopics has convenience functions that get us more concisely from the data frame of feature counts to the sparse term-document matrix:
+
+```{r prune-counts, echo=T}
+rank_cutoff <- 3200
+keep_features <- counts %>%
+    group_by(word) %>%
+    summarize(doc_freq=n()) %>%
+    top_n(2 * rank_cutoff, doc_freq) %>%
+    # apostrophes
+    filter(str_detect(word, "^\\w(\\w|')*$")) %>%
+    top_n(rank_cutoff, doc_freq)
+pruned_counts <- counts %>%
+    filter(word %in% keep_features$word) %>%
+    wordcounts_Matrix()
+```
+
+We actually have `r nrow(pruned_counts)` features, a superset of U&S's, because we have allowed for ties at the bottom of the frequency list. If the results are sensitive to this, that's something we'd like to know, so let's continue without discarding those extra features.[^numeric-check]
+
+[^numeric-check]: I did try to check that I was working with the same counts of the 3200 features in common. See the end of the post.
+
+Now we have to to do the logistic regression modeling, trying to match the choices of U&S.  We'll use L2 regularization ("ridge regression"), as they do when they use the [scikit-learn default](https://github.com/tedunderwood/paceofchange/blob/master/modelingprocess.py#L58).
+
+Then we will obtain a predicted probability of being reviewed for each document as follows:
+
+1. Discard all documents by the same author.
+2. Construct a model of the remaining documents.
+3. Use this model to predict the probability of the target document being reviewed.
+      
+This is a kind of cross-validation, but the goal is not to assess the model's overall performance but, as we will see, to search for unexplained variation. The holding-out rule is also interestingly asymmetric: we generate a prediction for the held-out volume that doesn't incorporate information about the volume itself, including information about its author's style.
+U&S do this so they can make non-circular predictions for every volume in their set. But it's important to see that the resulting "predicted probabilities" of being reviewed are not all predictions from the same logistic regression model.^[I suppose it would be possible to come up with a more elaborate multilevel model in which one first draws an author, and then draws word probabilities, but in the present case, where most authors only appear once in the set, it might make more sense just to throw out a few more volumes.]
+
+To do regularized regression in R, we use the [glmnet](https://cran.r-project.org/web/packages/glmnet/) package. I found the [package vignette](https://cran.r-project.org/web/packages/glmnet/vignettes/glmnet_beta.html) very helpful as a guide through to the basic nuts and bolts. The package workhorse function is `glmnet`, which takes a matrix of predictors and a vector of response values. Logistic regression is specified by the parameter `family="binomial"` (which by default uses the logit link function we want).[^logit] We choose the L2 penalty by setting `alpha=0`. There are `r n_distinct(meta$author)` authors in our set, so that is the number of models we have to construct. Finally, U&S normalize feature counts as ([slightly less than ?](https://github.com/tedunderwood/paceofchange/blob/master/parallel_crossvalidate.py#L351)) proportions of the total number of features in each document, so we do the same, and then [standardize them](https://github.com/tedunderwood/paceofchange/blob/master/parallel_crossvalidate.py#L428). `glmnet` will do the latter step for us.
+Finally, for predictions, we fix the regularization strength at a constant. [U&S give their choice as C = 0.00007](https://github.com/tedunderwood/paceofchange/blob/master/parallel_crossvalidate.py#L600), which they report as maximizing overall predictive accuracy, but scikit-learn's definition of C is different from glmnet's definition of lambda. If I am reading the glmnet and scikit-learn documentation right, we translate with `lambda = 1 / (C * N)`, where `N` is the number of observations.
+
+```{r normalize-rows, echo=T}
+# not sure why the extra 0.001
+feats <- rescale_rows(pruned_counts, 1 / (rowSums(pruned_counts) + 0.001))
+```
+
+[^logit]: A note because for the longest time I have found this confusing. It's called "binomial" because we model the response variable (that is, reviewed or random) as a draw from a binomial distribution---a (biased) coin flip, where the chance of being reviewed, that is, the expectation of the variable's distribution, depends on the counts of the features for each case. 
+
+Here is the modeling step.^[Both a `for` loop and assigning to a vector one element at a time, and proud of it.]
+
+```{r estimate-reviewed-probs, echo=T}
+# U&S's choice of regularization constant (?)
+lambda_us <- 1 / (0.00007 * nrow(feats))
+n_auth <- nlevels(meta$author)
+ms <- vector("list", n_auth)
+names(ms) <- levels(meta$author)
+predicted_probs <- numeric(nrow(feats))
+prog <- progress_estimated(nrow(feats))
+for (i in 1:nrow(feats)) {
+    au <- as.character(meta$author[i])
+    if (is.null(ms[[au]])) {
+        mask <- meta$author != au
+        ms[[au]] <- glmnet(
+            x=feats[mask, ],
+            y=meta$recept[mask],
+            family="binomial",
+            alpha=0,
+            standardize=T,
+            lambda=lambda_us # docs say don't do this,
+        )                    # but...
+    }
+    predicted_probs[i] <- predict(ms[[au]],
+        feats[i, , drop=F], s=lambda_us,
+        type="response")
+    prog$tick()
+    prog$print()
+}
+```
+
+We don't actually specify the regularization constant lambda in the call to `glmnet`. The documentation for `glmnet` warns us that specifying a single lambda is much slower than computing a "regularization path" (that is, trying a sequence of lambda values) and then doing the prediction for fixed lambda afterwards, but in this case doing the regularization paths takes about 50 times as long. 
+
+We now have what we need to try to reproduce U&S's key figure (fig. 1, p. 8).  The date information is not included in the model, but it is used in the plot.
+
+```{r repro-fig}
+meta %>%
+    select(year=firstpub,
+           actually=recept) %>%
+    mutate(prob=predicted_probs) %>%
+    ggplot(aes(year, prob)) +
+        geom_point(aes(color=actually, shape=actually)) +
+        scale_color_manual(values=c(reviewed="red", random="gray30")) +
+        geom_smooth(method="lm", se=F, color="blue") +
+        labs(x="publication year",
+             y="predicted probability",
+             title="Regularized logistic regression predictions of poetry reviewing over time")
+```
+
+```{r confusion}
+confusion <- function (p, actual) {
+    table(p >= 0.5, actual)
+}
+repro_cm <- confusion(predicted_probs, meta$recept)
+```
+
+The visual impression of this plot is very similar to U&S's figure. The key features of the plot that U&S emphasize are here: mostly correct classifications (`r
+repro_cm["TRUE", "reviewed"] + repro_cm["FALSE", "random"]
+` out of `r nrow(feats)`),
+plus an upward-sloping time-trend line. In fact I think that most of the predictions are a close match to U&S's. Voilà: a reproduction!
+
+Now that we know we've successfully found our way to U&S's ballpark, we can examine the effect of the modeling choices we can make. Let's start with the question of the elusive lambda, by fitting a model to all the data at varying values of lambda. We'll let `glmnet` choose the sequence and compute a classification error rate at each lambda value using 20-fold cross-validation:
+
+```{r m-cv, echo=T}
+nfolds <- 20
+m_cv <- cv.glmnet(feats, meta$recept, family="binomial",
+                  nfolds=nfolds,
+                  type.measure="class", alpha=0)
+# choice of lambda
+m_cv$lambda.min
+# which achieves the following CV classification error rate
+min(m_cv$cvm)
+```
+
+The error-rate number is *not* the proportion of mispredictions made by the chosen model but (*concentrate*, Goldstone) the `r nfolds`-fold cross-validation estimate of that rate. Notice the difference here in the use of the CV procedure: whereas U&S calculate a *different* statistic (namely, a prediction at a different held-out data-point) for every one of the models fitted in the leave-one-out CV, here `glmnet` is calculating the *same* statistic each time, the classification error rate, to give us a reasonable estimate of the performance of the model. We can see how U&S's lambda choice compares using a diagnostic plot:
+
+```{r m-cv-plot}
+m_cv[c("lambda", "cvm", "cvup", "cvlo")] %>%
+    as.data.frame() %>%
+    ggplot(aes(log(lambda), cvm)) +
+        geom_line(group=1, color="blue") +
+        geom_ribbon(aes(ymin=cvlo, ymax=cvup), alpha=0.2) +
+        geom_vline(xintercept=log(c(lambda_us, m_cv$lambda.min)),
+                   linetype=c("dotted", "dashed")) +
+        geom_hline(yintercept=min(m_cv$cvm), linetype="dashed") +
+        labs(x="log(lambda)", y="CV error rate (+/- 1 s.d.)",
+             title="Error rate vs. lambda\n(dotted: U&S, dashed: minimum)")
+```
+
+As this plot suggests, the best lambda is rather smaller than U&S's choice; then again, the difference between the corresponding error rates is just about one standard deviation, so only moderately significant. But describing the predictive power of the model is not the only thing we want to do. 
+
+U&S seek to interpret the extreme-valued coefficients of the model---the features having the largest influence, positive or negative, on the odds of being reviewed.[^coef-scale]
+Taking the model selected by cross-validation, we obtain this list of the most positively-influential coefficients (standardized):
+
+[^coef-scale]: Here the question of scaling returns. U&S examine the coefficients on the standardized scale. This means that a bigger coefficient on a word corresponds to a bigger increase in predicted log-odds *per unit standard deviation* of that word's frequencies. This is what has been optimized by the modeling process (scaling matters in regularized regression). If instead we are interested in comparing contributions to log-odds *per unit frequency*, we want the unstandardized coefficients. This doesn't seem to make a great deal of difference, at least when it comes to looking at the largest-magnitude coefficients. I imagine this is down to regularization, which shouldn't let really rare and overdispersed words run away with the prize. An alternative strategy, which I won't pursue here, would be to switch to the lasso to pick out features.
+
+```{r coef-table}
+coef_table <- function (cc, n=5, pos=T) {
+    o <- order(cc, decreasing=pos)[1:n]
+    data_frame(feature=names(cc)[o],
+               coefficient=cc[o])
+}
+```
+
+```{r m-cv-coefs}
+feats_sd <- apply(feats, 2, sd)
+# drop intercept
+m_cv_coefs <- coef(m_cv, s="lambda.min")[-1, ] * feats_sd
+coef_table(m_cv_coefs, 8) %>%
+    kable()
+```
+
+and negatively:
+
+```{r m-cv-coefs-neg}
+coef_table(m_cv_coefs, 8, pos=F) %>%
+    kable()
+```
+
+These lists of words are interesting, but they don't seem to me to be as crisply interpretable as the lists reported by U&S. Now compare the list of positively-charged coefficients generated by fixing lambda at the value selected by U&S:
+
+```{r coefs-lambda-us}
+(coef(m_cv, s=lambda_us)[-1, ] * feats_sd) %>%
+    coef_table(8) %>%
+    kable()
+```
+
+This closely reproduces U&S's list, where the tendency to monosyllabic concretion really jumps out. But it's no longer so clear that these are the words we should use to interpret the model. As U&S rightly note, we shouldn't lean too much on any particular set of words picked out this way. The modeling process has limited power.
+In cases where we have many more predictors than data points, regularization can help improve out-of-sample predictive accuracy by trading increased bias for reduced variance. But it can't make multicollinearity in the data go away: in this setting, according to Gareth James et al.'s *Introduction to Statistical Learning*, "at most, we can hope to assign large regression coefficients to variables that are correlated with the variables that truly are predictive of the outcome" (243). 
+
+Researchers should be very cautious about moving from good classification performance to interpreting lists of highly-weighted words. I've seen quite a bit of this going around, but it seems to me that it's very easy to lose sight of how many sources of variability there are in those lists. Literary scholars love getting a lot from details, but statistical models are designed to get the overall picture right, usually by averaging away the variability in the detail.
+
+Finally, we can follow U&S in looking for the worst misfits of the model. First the "random" volumes with highest odds of being reviewed in the model:
+
+```{r random-misfits}
+pred_m_cv <- meta %>%
+    select(id, recept, author, title, year=firstpub) %>%
+    mutate(prob=predict(m_cv, feats, s="lambda.min",
+        type="response")[ , 1])
+
+pred_m_cv %>%
+    filter(recept == "random") %>%
+    arrange(desc(prob)) %>%
+    top_n(5) %>%
+    select(author, title, year, response=prob) %>%
+    kable(digits=2)
+```
+
+Changing lambda does not change this list, and it confirms two observations made by U&S: first, four of these "random" volumes are immediately recognizable as high-prestige titles, with the exception of Dobson. Second, they belong to the late end of the period. Now let's consider reviewed volumes with lowest modeled odds:
+
+```{r reviewed-misfits}
+pred_m_cv %>%
+    filter(recept == "reviewed") %>%
+    arrange(prob) %>%
+    top_n(5, -prob) %>%
+    select(author, title, year, response=prob) %>%
+    kable()
+```
+
+I am only prepared to say that these titles are not yet familiar to me.
+
+## Inconclusive thoughts on the modeling choices
+
+The beautifully available data make it possible to investigate what would be lost and gained by making different choices in the analysis. They also make it possible to build on the work that U&S have done. And
+
+
+### Searching for historical change
+
+U&S make a remarkable observation about their not-quite-so-simple model: it makes errors that systematically depend on the year of publication.
+The later the publication date, the more likely it is to misclassify a "random" poetry volume as "reviewed." 
+
+> Predictions about literary prestige are skewed across time, presumably, because the difference between unreviewed and reviewed volumes is always analogous to the difference between works at the beginning and end of each period: so the best solution the model can find always has an upward slope (18–19).
+
+They show this by fitting a regression line of the predicted odds against year of publication. I find it hard to interpret that trend line, because almost every prediction comes from a (slightly) different model. Let's instead consider the model of all the data. Even though it performs well, we can still plot its misclassification rate against the publication date of volumes. 
+
+```{r mispred-plot}
+m_cv_preds <- predict(m_cv, feats, s="lambda.min", type="class")[ , 1]
+meta %>% select(year=firstpub, recept) %>%
+    mutate(predicted=m_cv_preds) %>%
+    count(year, recept, predicted) %>%
+    rename(count=n) %>%
+    group_by(year) %>%
+    mutate(total=sum(count)) %>%
+    filter(recept != predicted) %>%
+    rename(missed=count) %>%
+    ungroup() %>%
+    select(year, recept, missed, total) %>%
+    spread(recept, missed, fill=0) %>%
+    arrange(year) %>%
+    mutate(random_moving=rollsum(random, 5, NA) /
+                rollsum(total, 5, NA),
+           reviewed_moving=rollsum(reviewed, 5, NA) /
+                rollsum(total, 5, NA)) %>%
+    ggplot(aes(year)) +
+        geom_line(aes(y=random_moving, color="random"), group=1) +
+        geom_line(aes(y=reviewed_moving, color="reviewed"), group=1) +
+        scale_color_manual(name="actually",
+                       values=c(random="blue", reviewed="orange")) +
+        labs(x="publication year",
+             y="test error rate (5-year moving window)",
+             title="Full model misses over time")
+```
+
+These test error rates make the model look better than it is, but even so we can see the way that misclassifications of the "random" set are worst at the end of the century. That is to say that we should be able to improve the model predictions just by throwing the publication year in as a feature:
+
+```{r m-time, echo=T}
+m_time <- cv.glmnet(cbind(feats, meta$firstpub),
+                    meta$recept, family="binomial",
+                    nfolds=nfolds,
+                    type.measure="class", alpha=0)
+# choice of lambda
+m_time$lambda.min
+# which achieves the following CV classification error rate
+min(m_time$cvm)
+# with s.d.
+m_time$cvsd(which.min(m_time$cvm))
+```
+
+Possibly (not strongly) better. As U&S point out, a linear time trend isn't really interpretable, since the corpus is balanced over time between random and reviewed volumes. This tells us there is unexplained variation, which would need, perhaps, to be modeled by including some kind of feedback effect. That sounds hard but worth doing.
+
+From here we could go on to try the other demographic variables included by U&S, but I'll leave that aside. The last thing I want to glance at is the size of the feature set. We have a lot of features. How many could we drop without degrading the performance of the classifier? One way to do this would be to use the lasso instead of the ridge penalty, which by design will drive many coefficients to zero. Alternatively, we could just throw away infrequent features by handfuls and see how the model does. The lasso is easy, so I'll go with that.
+
+```{r m-lasso, echo=T}
+m_cvl <- cv.glmnet(feats, meta$recept, family="binomial",
+                   nfolds=nfolds,
+                   type.measure="class", alpha=1)
+# non-zero coefficients
+m_cvl$nzero[which.min(m_cvl$cvm)]
+```
+
+At the cost of a moderately increased minimum CV error rate---`r min(m_cvl$cvm)`, s.d. `r m_cvl$cvsd[which.min(m_cvl$cvm)]`---this proposes a model with many fewer predictors. The only moral here is, again, that there is a lot of correlation among the word frequencies, and hence a lot of redundant information.
+
+And here we come up against the limits of the word lists themselves for understanding what U&S rightly emphasize is a boundary drawn by social processes. Assuming that we have managed to dodge all the dangers of overfitting, all the reasonable (though not awe-inspiring) performance of the word-based classifier tells us is that these combinations of word frequencies correlate with whatever factors might explain the difference between the reviewed volumes and the randomly-sampled ones. Everything we know about literary reception tells us that some of those factors are not textual (relating instead to the author's and the publisher's characteristics, the overall configuration of the book trade, etc.), even though *some* of those non-textual factors may themselves have verbal correlates. In other words: are the "literary standards" examined here the linguistic criteria which earn legitimacy, or are they the verbal habits of those who are legitimate? I'm sure U&S would answer "both." Disentangling the two will require modeling in which the non-linguistic stands a chance of emerging as an explanatory factor.
+
+
+## Appendix: non-reproduction
+
+```{r check}
+# load U&S's model coefficients
+us_coef <- read_csv("paceofchange/results/mainmodelcoefficients.csv", 
+                    col_names=c("word", "coef", "rescaled_coef"))
+# load U&S's model predictions
+us_predict <- read_csv("paceofchange/results/mainmodelpredictions.csv")
+# inverse link function (inverse log-odds, here)
+# function to calculate probability from coefficients and predictors
+inverse_link <- function (x, b) 1 / (1 + exp(-sum(x * b)))
+computed_probs <- apply(
+      # standardize feats to mean 0, sd 1
+      # reorder rows; reorders columns and drop extra features
+      scale(feats)[us_predict$volid, us_coef$word],
+      1,
+      inverse_link,
+      b=us_coef$coef / 100
+)
+all.equal(unname(computed_probs), us_predict$logistic, tol=1e-4)
+```
+
+But the match is not exact, and a few numbers are quite different. I am not sure what's going on here. (There's no intercept term in these calculations, though there is probably one in the model U&S used. But because of the balanced design of the corpus, that intercept should make almost no difference.) I am docking U&S's Reproducibility Grade down from 100 to 99.95 for the [undocumented rescaling of coefficients by 100](https://github.com/tedunderwood/paceofchange/blob/master/parallel_crossvalidate.py#L431) in their outputs.
+
