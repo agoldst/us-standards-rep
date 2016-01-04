@@ -281,11 +281,7 @@ I am only prepared to say that these titles are not yet familiar to me.
 
 ## Inconclusive thoughts on the modeling choices
 
-The beautifully available data make it possible to investigate what would be lost and gained by making different choices in the analysis. They also make it possible to build on the work that U&S have done. And
-
-
-### Searching for historical change
-
+The beautifully available data make it possible to investigate what would be lost and gained by making different choices in the analysis. They also make it possible to build on the work that U&S have done. 
 U&S make a remarkable observation about their not-quite-so-simple model: it makes errors that systematically depend on the year of publication.
 The later the publication date, the more likely it is to misclassify a "random" poetry volume as "reviewed." 
 
@@ -350,7 +346,7 @@ m_cvl$nzero[which.min(m_cvl$cvm)]
 
 At the cost of a moderately increased minimum CV error rate---`r signif(min(m_cvl$cvm), 2)`, s.d. `r signif(m_cvl$cvsd[which.min(m_cvl$cvm)], 2)`---this proposes a model with many fewer predictors. The only moral here is, again, that there is a lot of correlation among the word frequencies, and hence a lot of redundant information.
 
-And here we come up against the limits of the word lists themselves for understanding what U&S rightly emphasize is a boundary drawn by social processes. Assuming that we have managed to dodge all the dangers of overfitting, all the reasonable (though not awe-inspiring) performance of the word-based classifier tells us is that these combinations of word frequencies correlate with whatever factors might explain the difference between the reviewed volumes and the randomly-sampled ones. Everything we know about literary reception tells us that some of those factors are not textual (relating instead to the author's and the publisher's characteristics, the overall configuration of the book trade, etc.), even though *some* of those non-textual factors may themselves have verbal correlates. Then, though lists of words lend themselves mostly easily to interpretation in terms of diction, lexical choice is presumably conditioned by many phenomena that are mediated in the text of poems, like genre, theme, and meter. In other words: are the "literary standards" examined here the linguistic criteria which earn legitimacy, or are they the verbal habits of those who are legitimate? I'm sure U&S would answer "both." Disentangling the two will require modeling in which the non-linguistic stands a chance of emerging as an explanatory factor.
+And here we come up against the limits of the word lists themselves for understanding what U&S rightly emphasize is a boundary drawn by social processes. Assuming that we have managed to dodge all the dangers of overfitting, all the reasonable (though not awe-inspiring) performance of the word-based classifier tells us is that these combinations of word frequencies correlate with whatever factors might explain the difference between the reviewed volumes and the randomly-sampled ones. Everything we know about literary reception tells us that some of those factors are not textual (relating instead to the author's and the publisher's characteristics, the overall configuration of the book trade, etc.), even though *some* of those non-textual factors may themselves have verbal correlates. Then, though lists of words lend themselves most easily to interpretation in terms of diction, lexical choice is presumably conditioned by many other phenomena that are mediated in the text of poems, like genre, theme, and meter. In other words: are the "literary standards" examined here the linguistic criteria which earn legitimacy, or are they the verbal habits of those who are legitimate? I'm sure U&S would answer "both." Disentangling the two will require modeling in which the non-linguistic stands a chance of emerging as an explanatory factor.
 
 
 ## Appendix: a non-reproduction
@@ -379,3 +375,4 @@ all.equal(unname(computed_probs), us_predict$logistic, tol=1e-4)
 
 The match is not exact, and a few numbers are quite different. I am not sure what's going on here. There's no intercept term in these calculations, though there is probably one in the model U&S used. But because of the balanced design of the corpus, that intercept should make almost no difference. I am docking U&S's Reproducibility Grade down from 100 to 99.95 for the [undocumented rescaling of coefficients by 100](https://github.com/tedunderwood/paceofchange/blob/master/parallel_crossvalidate.py#L431) in their outputs.
 
+[Edited *1/4/16*. Cosmetic edits, including removing a stray heading from an earlier draft.]
