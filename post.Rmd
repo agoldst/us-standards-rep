@@ -357,7 +357,7 @@ And here we come up against the limits of the word lists themselves for understa
 
 I wanted to check that my feature counts matched U&S's by using their list of model coefficients to reproduce their list of estimated probabilities. But I did not quite succeed:
 
-```{r check}
+```{r check, echo=T}
 # load U&S's model coefficients
 us_coef <- read_csv("paceofchange/results/mainmodelcoefficients.csv", 
                     col_names=c("word", "coef", "rescaled_coef"))
