@@ -203,6 +203,9 @@ m_cv[c("lambda", "cvm", "cvup", "cvlo")] %>%
         geom_vline(xintercept=log(c(lambda_us, m_cv$lambda.min)),
                    linetype=c("dotted", "dashed")) +
         geom_hline(yintercept=min(m_cv$cvm), linetype="dashed") +
+        annotate(geom="text", label=c(" U&S", " minimum"),
+                 x=log(c(lambda_us, m_cv$lambda.min)), y=0.4,
+                 hjust=0) +
         labs(x="log(lambda)", y="CV error rate (+/- 1 s.d.)",
              title="Error rate vs. lambda\n(dotted: U&S, dashed: minimum)")
 ```
