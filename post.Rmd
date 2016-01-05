@@ -269,7 +269,7 @@ pred_m_cv %>%
     kable(digits=2)
 ```
 
-Changing lambda does not change this list, and it confirms two observations made by U&S: first, four of these "random" volumes are immediately recognizable as high-prestige titles, with the exception of Dobson. Second, they belong to the late end of the period. Now let's consider reviewed volumes with lowest modeled odds:
+Changing lambda does not change this list, and it confirms two observations made by U&S: first, except for the Dobson, all of these "random" volumes are immediately recognizable as high-prestige titles. Second, they belong to the late end of the period. Now let's consider reviewed volumes with lowest modeled odds:
 
 ```{r reviewed-misfits}
 pred_m_cv %>%
@@ -378,4 +378,4 @@ all.equal(unname(computed_probs), us_predict$logistic, tol=1e-4)
 
 The match is not exact, and a few numbers are quite different. I am not sure what's going on here. There's no intercept term in these calculations, though there is probably one in the model U&S used. But because of the balanced design of the corpus, that intercept should make almost no difference. I am docking U&S's Reproducibility Grade down from 100 to 99.95 for the [undocumented rescaling of coefficients by 100](https://github.com/tedunderwood/paceofchange/blob/master/parallel_crossvalidate.py#L431) in their outputs.
 
-[Edited *1/4/16*. Cosmetic edits, including removing a stray heading from an earlier draft.]
+[*Minor edits 1/4/16–*: [revision history here](https://github.com/agoldst/us-standards-rep/commits/master).]
