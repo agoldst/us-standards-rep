@@ -1,12 +1,13 @@
 ---
 title: "Of Literary Standards and Logistic Regression: A Reproduction"
+url: /blog/2016/01/04/standards/
+categories:
+- DH
+- theory
+- sociological bandwagon
+- kludgetastic
 date: 2016-01-04
-categories: [dh,theory,sociological-bandwagon,kludgetastic]
-layout: post
-output:
-    md_document:
-        variant: markdown
-        pandoc_args: ["--no-wrap"]
+output: hugormd::post
 ---
 
 This post is a discussion and partial replication of Ted Underwood and Jordan Sellers's fascinating essay "How Quickly Do Literary Standards Change?" (available in [preprint](https://figshare.com/articles/How_Quickly_Do_Literary_Standards_Change_/1418394) and discussed on [Ted's blog](http://tedunderwood.com/2015/05/18/how-quickly-do-literary-standards-change/)). Hats off to Ted and Jordan, who have contributed something really remarkable here, not just in their provocative arguments but in the data they have made usable by others. It's one thing to circulate data and code so that someone can *in principle* re-run your scripts---though that is already a lot---and quite another to make the data accessible enough for fresh analyses. The latter is a very demanding standard, too demanding for everyone to meet, I think. But it *is* what is required to let others build directly on your results. Even more importantly, it's what's needed to make research results *pedagogically* available. As I argue in an essay I'm working on now, any quantitative methods pedagogy should---must---lean heavily on the results of research. In the [immortal words](http://miriamposner.com/blog/humanities-data-a-necessary-contradiction) of Miriam Posner, "It's just awful trying to find a humanities dataset": one of the best ways to address this challenge would be to make good research data available in recirculable, easily accessible form.
@@ -18,8 +19,8 @@ library(knitr)
 # attempt to set a reasonable code output textwidth
 options(width=44)
 opts_knit$set(width=44)
+options(knitr.table.format="html") # for kable()
 opts_chunk$set(
-    comment=NA, # no comment chars decorating code output
     collapse=T, # multiple statements and output collapsed together
     message=F, warning=F,             # quit your chatter, R
     error=F,    # stop on error: can get annoying
