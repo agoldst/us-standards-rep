@@ -45,7 +45,7 @@ dep_auto()
 Rather than give all the technical detail, 
 I'll only show the R code where it makes a point about the analysis. The full R markdown source for this post is [in this repository](http://github.com/agoldst/us-standards-rep). Feel free to skim right past the R listings anyway. This is a literary theory and data analysis post that happens to have some software details in it, not a programming post. Here we go...
 
-<!-- more -->
+<!--more-->
 
 I'm going to call Ted and Jordan U&S (Underwood and Sellers). First I downloaded U&S's [replication repository](https://github.com/tedunderwood/paceofchange).
 Loading the metadata as provided by U&S is straightforward. Reading in their files with feature counts for their chosen volumes is also not too hard to do from scratch, but I already did some of that work in my [dfrtopics package](https://github.com/agoldst/dfrtopics) and applied it to [files like these](/blog/2015/09/23/hathi/) in an earlier blogpost, so I can do that task in a few lines:
